@@ -55,7 +55,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
       - name: Pull secret scanner
         run: docker pull ghcr.io/kse-mseheda/custom-secret-detect:latest
       - name: Run secret scan

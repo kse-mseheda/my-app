@@ -1,4 +1,4 @@
-name: CI
+name: Main Build
 
 on:
   push:
@@ -7,9 +7,10 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +28,7 @@ jobs:
         run: npm test
 
   docker-build-push:
-    needs: test
+    needs: build-and-test
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -46,21 +47,63 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-  secret-scan:
-    runs-on: ubuntu-latest
+  sbom-and-scan:
+    needs: docker-build-push
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+
+      - name: Generate SBOM with Trivy
+        uses: aquasecurity/trivy-action@master
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
-      - name: Pull secret scanner
-        run: docker pull ghcr.io/kse-mseheda/custom-secret-detect:latest
-      - name: Run secret scan
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Upload SBOM to Dependency-Track
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}":/scan \
-            ghcr.io/kse-mseheda/custom-secret-detect:latest \
-            /scan/
+          curl -sf -X POST "${{ vars.DTRACK_URL }}/api/v1/bom" \
+            -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
+            -H "Content-Type: multipart/form-data" \
+            -F "projectName=my-app" \
+            -F "projectVersion=${{ github.sha }}" \
+            -F "autoCreate=true" \
+            -F "bom=@sbom.cdx.json"
+
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image-results.sarif
+
+  update-deployment:
+    needs: docker-build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployment repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/kse-labs-deployment
+          token: ${{ secrets.DEPLOYMENT_PAT }}
+
+      - name: Update image tag
+        run: |
+          sed -i "s|image: ghcr.io/${{ github.repository }}:.*|image: ghcr.io/${{ github.repository }}:${{ github.sha }}|" \
+            applications/my-app/deployment.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add applications/my-app/deployment.yaml
+          git diff --cached --quiet || \
+            (git commit -m "deploy: my-app ${{ github.sha }}" && git push)

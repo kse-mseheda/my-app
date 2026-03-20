@@ -8,7 +8,7 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
-});
+}); // Health check endpoint
 
 if (require.main === module) {
   app.listen(port, () => console.log(`Listening on port ${port}`));

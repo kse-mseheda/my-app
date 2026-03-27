@@ -8,6 +8,7 @@ permissions:
   contents: read
   packages: write
   security-events: write
+  id-token: write
 
 jobs:
   build-and-test:
@@ -26,6 +27,40 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  docker-build-sign:
+   needs: build-and-test
+   runs-on: ubuntu-latest
+   steps:
+     - uses: actions/checkout@v6
+
+     - uses: sigstore/cosign-installer@v3
+
+     - uses: docker/login-action@v4
+       with:
+         registry: ghcr.io
+         username: ${{ github.actor }}
+         password: ${{ secrets.GHCR_PAT }}
+
+     - name: Build and push
+       id: build
+       uses: docker/build-push-action@v7
+       with:
+         context: .
+         push: true
+         tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+     - name: Sign with Cosign (keyless)
+       run: |
+         cosign sign --yes \
+           ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+
+     - name: Verify signature
+       run: |
+         cosign verify \
+           --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+           --certificate-identity-regexp="github.com/${{ github.repository }}" \
+           ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
 
   docker-build-push:
     needs: build-and-test

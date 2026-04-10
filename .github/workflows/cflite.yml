@@ -27,7 +27,7 @@ jobs:
         run: npm install --no-save @jazzer.js/core
 
       - name: Fuzz transform
-        run: npx jazzer fuzz/fuzz_transform.js --fuzz_seconds=120
+        run: npx jazzer fuzz/fuzz_transform.js --timeout=120
 
       - name: Fuzz merge
-        run: npx jazzer fuzz/fuzz_merge.js --fuzz_seconds=120
+        run: npx jazzer fuzz/fuzz_merge.js --timeout=120

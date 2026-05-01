@@ -14,16 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Build fuzzers
-        id: build
-        uses: google/clusterfuzzlite/actions/build_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # main
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          language: javascript
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Run fuzzers
-        id: run
-        uses: google/clusterfuzzlite/actions/run_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          fuzz-seconds: 300
-          mode: code-change
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Jazzer.js
+        run: npm install --no-save @jazzer.js/core
+
+      - name: Fuzz transform
+        run: npx jazzer fuzz/fuzz_transform.js --timeout=120
+
+      - name: Fuzz merge
+        run: npx jazzer fuzz/fuzz_merge.js --timeout=120
